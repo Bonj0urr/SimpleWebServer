@@ -1,7 +1,8 @@
+#include "server.h"
 #include <stdio.h>
-#include <unistd.h>
+#include <stdlib.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <unistd.h>
 #include "string.h"
 #include <fcntl.h>
 #include <sys/sendfile.h>
@@ -10,37 +11,33 @@
 #define BUFFER_SIZE 256
 #define PORT 8080
 
+void launch_server(struct Server* server);
+
 int main()
 {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1)
+    int backlog = 9;
+    struct Server server = construct_server(AF_INET, SOCK_STREAM, 0, PORT, INADDR_ANY, backlog, launch_server);
+
+    server.launch(&server);
+
+    return 0;
+}
+
+void launch_server(struct Server* server)
+{
+    if(!server)
     {
-        printf("Failed to create a socket!");
-        return 1;
+        perror("Server isn't valid!");
+        exit(1);
     }
+    printf("Waiting for the connection...");
 
-    struct sockaddr_in addr = { AF_INET, htons(PORT), 0 }; /* Convert from host to network byte order */
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Server's IP address */
-
-    int bind_res = bind(sockfd, (struct sockaddr*)&addr, sizeof(addr));
-    if(bind_res == -1)
-    {
-        printf("Failed to bind a socket!");
-        return 1;
-    }
-
-    int listen_res = listen(sockfd, 9);
-    if(listen_res == -1)
-    {
-        printf("Failed to prepare a socket to accept connections!");
-        return 1;
-    }
-
-    int client_sockfd = accept(sockfd, 0, 0);
+    unsigned int address_length = sizeof(server->address);
+    int client_sockfd = accept(server->sockfd, (struct sockaddr*)&server->address, &address_length);
     if(client_sockfd == -1)
     {
-        printf("Failed to connect a client!");
-        return 1;
+        perror("Failed to connect a client!");
+        exit(1);
     }
 
     char buffer[BUFFER_SIZE] = {0};
@@ -48,8 +45,8 @@ int main()
     int read_res = recv(client_sockfd, buffer, BUFFER_SIZE - 1, 0);
     if(read_res == -1)
     {
-        printf("Failed to read from the client socket!");
-        return 1;
+        perror("Failed to read from the client socket!");
+        exit(1);
     }
 
     /* Extract the requested file path */
@@ -59,20 +56,18 @@ int main()
     int requested_fd = open(requested_file, O_RDONLY);
     if(requested_fd == -1)
     {
-        printf("Failed to open a requested file!");
-        return 1;
+        perror("Failed to open a requested file!");
+        exit(1);
     }
 
     int send_res = sendfile(client_sockfd, requested_fd, 0, BUFFER_SIZE - 1);
     if(send_res == -1)
     {
-        printf("Failed to transfer the requested file data!");
-        return 1;
+        perror("Failed to transfer the requested file data!");
+        exit(1);
     }
 
-    close(sockfd);
+    close(server->sockfd);
     close(client_sockfd);
     close(requested_fd);
-
-    return 0;
 }
